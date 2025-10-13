@@ -1,26 +1,31 @@
+#include <cstdio>
 #include <iostream>
-#include <ios>
-#include <fstream>
-#include <chrono>
-#include <thread>
 #include <filesystem>
+#include <fstream>
+#include "read_data.h" 
 
-typedef struct WAV_HEADER{
-    char                RIFF[4];        // RIFF Header      Magic header
-    uint32_t       ChunkSize;      // RIFF Chunk Size  
-    char                WAVE[4];        // WAVE Header      
-    char                fmt[4];         // FMT header       
-    uint32_t       Subchunk1Size;  // Size of the fmt chunk                                
-    unsigned short      AudioFormat;    // Audio format 1=PCM,6=mulaw,7=alaw, 257=IBM Mu-Law, 258=IBM A-Law, 259=ADPCM 
-    unsigned short      NumOfChan;      // Number of channels 1=mono 2=stereo                   
-    uint32_t       SamplesPerSec;  // Sampling Frequency in Hz                             
-    uint32_t       bytesPerSec;    // bytes per second 
-    unsigned short      blockAlign;     // 2=16-bit mono, 4=16-bit stereo 
-    unsigned short      bitsPerSample;  // Number of bits per sample      
-    char                Subchunk2ID[4]; // "data"  string   
-    uint32_t       Subchunk2Size;  // Sampled data length    
-}wav_hdr;
+// TODO There's a problem with wav files that have 8 bit sample sizes, it has to do with how the program parses them and with the function pointer
 
+void writeBackToFileCsv(unsigned char* buffer, size_t sizeOfBuffer, std::string fileName){
+    std::string filePath = (std::filesystem::current_path() / fileName).string();
+    std::fstream ofs(filePath.c_str(), std::ios::out | std::ios::binary);
+    if (!ofs){
+        std::cerr << filePath.c_str() << " Not found" << std::endl;
+    }
+    for(int i = 0; i<sizeOfBuffer-1; i+=2){
+        ofs << ((unsigned short)(buffer[i]) | (unsigned short)(buffer[i+1]) << 8) << ", ";
+    }
+}
+void writeBackToFile(char* header, char* buffer, size_t sizeOfBuffer, std::string filename){
+    std::string filePath = (std::filesystem::current_path() / filename).string();
+    std::fstream ofs(filePath.c_str(), std::ios::out | std::ios::binary);
+    if (!ofs){
+        std::cerr << filePath.c_str() << " Not found" << std::endl;
+    }
+    
+    ofs.write(header, 44);
+    ofs.write(buffer, sizeOfBuffer);
+}
 void printAttri(wav_hdr wavHeader){
     using namespace std;
      cout << "RIFF header                :" << wavHeader.RIFF[0] 
@@ -59,73 +64,91 @@ void printAttri(wav_hdr wavHeader){
                                                 << wavHeader.Subchunk2ID[3] 
                                                 << endl;
 }
-
+uint8_t bytesToByte(char first){
+    return (uint8_t)((unsigned char) first);
+}
 uint16_t bytesToShort(char first, char second){
     return (uint16_t)((unsigned char)first | (unsigned char)second << 8);
 }
-
 uint32_t bytesToInt32(char first, char second, char third, char fourth){
     return (uint32_t)((unsigned char)first | 
         (unsigned char)second << 8 |
         (unsigned char)third << 16 | 
         (unsigned char)fourth << 24); 
 }
-
+template <typename sampleSize>
 void readWaveData(char* array, size_t size){
+    sampleSize waveSample;
+    const int step = sizeof(waveSample);
     uint32_t temp = (uint32_t)(array); 
-    temp += sizeof(char)*(size-1);
-    for(; array<(char*)temp; array+=2){
+    temp += sizeof(char)*(size);
+    uint16_t (*conversionType)(char, char, char, char);
+    std::cout << step << std::endl;
+    // okay this switch isn't working for 8 bit sample values and i'm unsure if it's the struct but try a struct sort of like this from stackoverflow:
+    // okay i just found out its not the switch but is actually a problem with that code but i still think a struct would be cleaner
+    /*
+        typedef struct {
+          char *name;      // suggest const char *name
+          void (*func)();  // no parameter info nor checking
+        } command_info;
+
+        char buf[100];
+        // void setbuf(FILE * restrict stream, char * restrict buf);
+        command_info fred = { "my_setbuf", setbuf };
+
+        // Both compile, 2nd is UB.
+        fred.func(stdin, buf);  // No parameter checking.
+    */
+    std::cout << size << std::endl;
+    switch(step){
+        case 2:{
+        conversionType = (uint16_t (*)(char, char, char, char)) bytesToShort;
+        break;}
+        case 4:{
+        uint32_t (*conversionType)(char, char, char, char) = (uint32_t (*)(char, char, char, char)) bytesToInt32;
+        break;}
+    }
+    
+    for(; array<(char*)temp; array+=step){
     // Every sample is a point on a wave
     // So if the point is really high it's going to be louder
-    unsigned short waveSample = (unsigned short)((unsigned char)*array | (unsigned char)*(array+1) << 8); 
+    // (step!=1) ? (*conversionType)(*array, *(array+1), *(array+2), *(array+3)) : 
+    waveSample = (*conversionType)(*array, *(array+1), *(array+2), *(array+3));
+    //waveSample = (*conversionType)(*array); // the problem was that it was going out of bounds as I forgot to change it to be a set length
     waveSample*=1;
-    memcpy(array, &waveSample, 2);
+    memcpy(array, &waveSample, step);
     }
 }
-
-void writeBackToFile(char* header, char* buffer, size_t sizeOfBuffer){
-    std::string filePath = (std::filesystem::current_path() / "output.wav").string();
-    std::fstream ofs(filePath.c_str(), std::ios::out | std::ios::binary);
-    if (!ofs){
-        std::cerr << filePath.c_str() << " Not found" << std::endl;
-    }
-    
-    ofs.write(header, 44);
-    ofs.write(buffer, sizeOfBuffer);
-    
-}
-
-void writeBackToFileCsv(unsigned char* buffer, size_t sizeOfBuffer, std::string fileName){
-    std::string filePath = (std::filesystem::current_path() / fileName).string();
-    std::fstream ofs(filePath.c_str(), std::ios::out | std::ios::binary);
-    if (!ofs){
-        std::cerr << filePath.c_str() << " Not found" << std::endl;
-    }
-    for(int i = 0; i<sizeOfBuffer-1; i+=2){
-        ofs << ((unsigned short)(buffer[i]) | (unsigned short)(buffer[i+1]) << 8) << ", ";
+// Specialization for 24 bit samples
+template<>
+void readWaveData<int24>(char* array, size_t size){
+    uint32_t temp = (uint32_t)(array); 
+    temp += sizeof(char)*(size-2); // <- remember to check this because it should be different
+    const int step = 24/8;
+    int24 waveSample;
+    for(; array<(char*)temp; array+=step){
+    waveSample.data = (uint32_t)((unsigned char)*array | (unsigned char)*(array+1) << 8 | (unsigned char)*(array+2)<<16); 
+    waveSample.data*=1;
+    memcpy(array, &waveSample, step);
     }
 }
-
+const std::string filenamein = "file.wav";
 int main(){
-
-    std::string filePath = (std::filesystem::current_path() / "file.wav").string();
+    std::string filePath = (std::filesystem::current_path() / filenamein).string();
     std::fstream ifs(filePath.c_str(), std::ios::in | std::ios::binary | std::ios::ate);
     if (!ifs){
         std::cerr << filePath.c_str() << " Not found " << std::endl;
     }
 
     long length = static_cast<long>(ifs.tellg())-44;
-    long lengthreal = ifs.tellg();
-    //std::cout << length << std::endl;
     char* buffer = new char[length];
     ifs.seekg(0, std::ios::beg);
     char* header = new char[44];
     ifs.read(header, 44);
-
     ifs.read(buffer, length);
     buffer[length]='\0';
 
-
+    
     wav_hdr wavHeader;
 
     memcpy(wavHeader.RIFF, &header[0], 4);
@@ -153,14 +176,24 @@ int main(){
     memcpy(wavHeader.Subchunk2ID, &header[36], 4);
 
     wavHeader.Subchunk2Size = bytesToInt32(header[40], header[41], header[42], header[43]);
-    
-    writeBackToFileCsv(reinterpret_cast<unsigned char*>(buffer), length, "out1.csv");
-    readWaveData(buffer, length);
-    writeBackToFile(header, buffer, length);
-    writeBackToFileCsv(reinterpret_cast<unsigned char*>(buffer), length, "out2.csv");
-    printAttri(wavHeader);
-
-    delete buffer;
+    printAttri(wavHeader); // with files with 8 bit sizes for their samples this throws an error ?
+    std::cout << wavHeader.WAVE[0] << wavHeader.WAVE[1];
+    std::cout << std::endl;
+    //writeBackToFileCsv((unsigned char*)buffer, length, "out81.csv");
+    std::cout << std::endl;
+    switch(wavHeader.bitsPerSample){
+        case 8:
+        readWaveData<unsigned char>(buffer, length);
+        case 16:
+        readWaveData<unsigned short>(buffer, length);
+        case 24:
+        readWaveData<int24>(buffer, length);
+        case 32:
+        readWaveData<unsigned short>(buffer, length);
+    }
+    //writeBackToFileCsv(reinterpret_cast<unsigned char*>(buffer), length, "out82.csv");
+    writeBackToFile(header, buffer, length, "output4.wav");
     delete header;
+    delete buffer;
     return 0;
 }
