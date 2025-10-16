@@ -21,3 +21,6 @@ void readWaveData(char* array, size_t size);
 
 template<>
 void readWaveData<int24>(char* array, size_t size);
+
+template<>
+void readWaveData<unsigned char>(char* array, size_t size);

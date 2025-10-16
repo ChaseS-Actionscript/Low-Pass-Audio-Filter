@@ -4,8 +4,6 @@
 #include <fstream>
 #include "read_data.h" 
 
-// TODO There's a problem with wav files that have 8 bit sample sizes, it has to do with how the program parses them and with the function pointer
-
 void writeBackToFileCsv(unsigned char* buffer, size_t sizeOfBuffer, std::string fileName){
     std::string filePath = (std::filesystem::current_path() / fileName).string();
     std::fstream ofs(filePath.c_str(), std::ios::out | std::ios::binary);
@@ -28,7 +26,7 @@ void writeBackToFile(char* header, char* buffer, size_t sizeOfBuffer, std::strin
 }
 void printAttri(wav_hdr wavHeader){
     using namespace std;
-     cout << "RIFF header                :" << wavHeader.RIFF[0] 
+     cout << "RIFF header                :" << wavHeader.RIFF[0] // Putting a breakpoint at the start of this function and then moving past this line causes a crash ?
                                                 << wavHeader.RIFF[1] 
                                                 << wavHeader.RIFF[2] 
                                                 << wavHeader.RIFF[3] << endl;
@@ -81,7 +79,7 @@ void readWaveData(char* array, size_t size){
     sampleSize waveSample;
     const int step = sizeof(waveSample);
     uint32_t temp = (uint32_t)(array); 
-    temp += sizeof(char)*(size);
+    temp += sizeof(char)*(size-(step-1));
     uint16_t (*conversionType)(char, char, char, char);
     std::cout << step << std::endl;
     // okay this switch isn't working for 8 bit sample values and i'm unsure if it's the struct but try a struct sort of like this from stackoverflow:
@@ -132,7 +130,18 @@ void readWaveData<int24>(char* array, size_t size){
     memcpy(array, &waveSample, step);
     }
 }
-const std::string filenamein = "file.wav";
+template<>
+void readWaveData<unsigned char>(char* array, size_t size){
+    uint32_t temp = (uint32_t)(array);
+    temp += sizeof(char)*(size);
+    unsigned char waveSample;
+    for(; array<(char*)temp; array++){
+        waveSample = (unsigned char)*array;
+        waveSample*=1;
+        memcpy(array, &waveSample, 1);
+    } 
+}
+const std::string filenamein = "8bit.wav";
 int main(){
     std::string filePath = (std::filesystem::current_path() / filenamein).string();
     std::fstream ifs(filePath.c_str(), std::ios::in | std::ios::binary | std::ios::ate);
@@ -179,7 +188,7 @@ int main(){
     printAttri(wavHeader); // with files with 8 bit sizes for their samples this throws an error ?
     std::cout << wavHeader.WAVE[0] << wavHeader.WAVE[1];
     std::cout << std::endl;
-    //writeBackToFileCsv((unsigned char*)buffer, length, "out81.csv");
+    writeBackToFileCsv((unsigned char*)buffer, length, "out81.csv");
     std::cout << std::endl;
     switch(wavHeader.bitsPerSample){
         case 8:
@@ -191,8 +200,8 @@ int main(){
         case 32:
         readWaveData<unsigned short>(buffer, length);
     }
-    //writeBackToFileCsv(reinterpret_cast<unsigned char*>(buffer), length, "out82.csv");
-    writeBackToFile(header, buffer, length, "output4.wav");
+    writeBackToFileCsv(reinterpret_cast<unsigned char*>(buffer), length, "out82.csv");
+    writeBackToFile(header, buffer, length, "output8.wav");
     delete header;
     delete buffer;
     return 0;
